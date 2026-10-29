@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[KING] 어비스 보스 젠타임 (실시간 공유)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase 실시간 연동을 위한 SDK 불러오기 -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body { font-family: 'Pretendard', sans-serif; }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-4 sm:p-6">
+    <div class="max-w-4xl mx-auto space-y-6">
+        
+        <!-- 상단 헤더 및 알림 설정 영역 -->
+        <header class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                    ⚔️ [KING] 어비스 보스 젠타임
+                </h1>
+                <p class="text-xs text-slate-400 mt-1">
+                    * 길드원 실시간 연동 모드 | 누군가 수정하면 전원 즉시 동기화
+                </p>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-3">
+                <!-- 알림 타이밍 설정 -->
+                <div class="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
+                    <span class="text-xs text-slate-400">알림 타이밍:</span>
+                    <input type="number" id="alertOffset" value="10" min="1" max="60" 
+                           class="w-14 bg-slate-900 text-center font-bold text-amber-400 rounded px-1 py-0.5 border border-slate-700 text-sm focus:outline-none focus:border-amber-500">
+                    <span class="text-xs text-slate-400">분 전</span>
+                </div>
+
+                <!-- 팝업/소리 개별 ON/OFF 토글 -->
+                <div class="flex items-center gap-3 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-xs">
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" id="popupToggle" checked class="rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-0">
+                        <span class="text-slate-300">팝업 알림</span>
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" id="soundToggle" checked class="rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-0">
+                        <span class="text-slate-300">소리 알림</span>
+                    </label>
+                </div>
+
+                <button onclick="requestNotificationPermission()" 
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition shadow-lg shadow-indigo-500/20">
+                    🔔 알림 권한 켜기
+                </button>
+            </div>
+        </header>
+
+        <!-- 보스 카드 리스트 -->
+        <main id="bossList" class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <!-- 동적 생성 -->
+        </main>
+
+        <footer class="text-center text-xs text-slate-500 py-4">
+            서버 실시간 연동 모드 (길드원 전체 동기화)
+        </footer>
+    </div>
+
+    <script>
+        // ==========================================
+        // 🛠️ [여기에 본인의 파이어베이스 설정을 붙여넣으세요]
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyCYQWm4i4VjBHpO1ANGmKC5FB87sqrB0gI",
+            authDomain: "king-boss-timer.firebaseapp.com",
+            databaseURL: "https://king-boss-timer-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "king-boss-timer",
+            storageBucket: "king-boss-timer.firebasestorage.app",
+            messagingSenderId: "263803109395",
+            appId: "1:263803109395:web:162a864d8d09bd330fbfe6"
+        };
+
+        // Firebase 초기화
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let bosses = [
+            { id: 1, name: '어비스 (바리탄)', cycleHours: 4, cycleMinutes: 0, lastKill: getDefaultObject() },
+            { id: 2, name: '어비스 (엘다르)', cycleHours: 8, cycleMinutes: 0, lastKill: getDefaultObject() },
+            { id: 3, name: '어비스 (카스티아)', cycleHours: 12, cycleMinutes: 0, lastKill: getDefaultObject() }
+        ];
+
+        function getDefaultObject() {
+            const now = new Date();
+            return {
+                month: now.getMonth() + 1,
+                day: now.getDate(),
+                hour: now.getHours(),
+                minute: 0
+            };
+        }
+
+        function getTimestamp(k) {
+            const now = new Date();
+            let year = now.getFullYear();
+            let d = new Date(year, (k.month || 1) - 1, k.day || 1, k.hour || 0, k.minute || 0, 0);
+            return d.getTime();
+        }
+
+        // 서버(Firebase)에 데이터 저장
+        function saveData() {
+            const dataToSave = {
+                bosses: bosses,
+                alertOffset: document.getElementById('alertOffset').value,
+                popupToggle: document.getElementById('popupToggle').checked,
+                soundToggle: document.getElementById('soundToggle').checked
+            };
+            db.ref('timerData').set(dataToSave);
+        }
+
+        // 서버에서 실시간으로 데이터 감지 및 동기화
+        db.ref('timerData').on('value', (snapshot) => {
+            const val = snapshot.val();
+            if (val) {
+                if (val.bosses) bosses = val.bosses;
+                if (val.alertOffset !== undefined) document.getElementById('alertOffset').value = val.alertOffset;
+                if (val.popupToggle !== undefined) document.getElementById('popupToggle').checked = val.popupToggle;
+                if (val.soundToggle !== undefined) document.getElementById('soundToggle').checked = val.soundToggle;
+                render();
+            } else {
+                // 데이터가 아예 없으면 초기값 세팅
+                saveData();
+            }
+        });
+
+        document.getElementById('alertOffset').addEventListener('change', saveData);
+        document.getElementById('popupToggle').addEventListener('change', saveData);
+        document.getElementById('soundToggle').addEventListener('change', saveData);
+
+        function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                alert("이 브라우저는 알림을 지원하지 않습니다.");
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    alert("알림 권한이 허용되었습니다!");
+                } else {
+                    alert("알림 권한이 거부되었습니다.");
+                }
+            });
+        }
+
+        function playBeep() {
+            if (!document.getElementById('soundToggle').checked) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.3);
+            } catch (e) {
+                console.log("Audio error");
+            }
+        }
+
+        let notifiedKeys = {};
+
+        function checkAlerts(bossName, nextSpawnTimeMs, offsetMinutes) {
+            const now = Date.now();
+            const diffMs = nextSpawnTimeMs - now;
+            const targetMs = offsetMinutes * 60 * 1000;
+
+            if (diffMs > 0 && diffMs <= targetMs + 1000) {
+                const key = `${bossName}-${nextSpawnTimeMs}`;
+                if (!notifiedKeys[key]) {
+                    notifiedKeys[key] = true;
+                    playBeep();
+
+                    if (document.getElementById('popupToggle').checked && Notification.permission === "granted") {
+                        new Notification(`🚨 [KING] 보스 임박: ${bossName}`, {
+                            body: `약 ${offsetMinutes}분 뒤(${new Date(nextSpawnTimeMs).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})에 젠됩니다!`,
+                            icon: 'https://cdn-icons-png.flaticon.com/512/2909/2909789.png'
+                        });
+                    }
+                }
+            }
+        }
+
+        function render() {
+            const container = document.getElementById('bossList');
+            container.innerHTML = '';
+            const now = new Date().getTime();
+            const alertOffset = parseInt(document.getElementById('alertOffset').value) || 10;
+
+            bosses.forEach((boss, index) => {
+                if (!boss.lastKill) boss.lastKill = getDefaultObject();
+                if (boss.cycleHours === undefined) boss.cycleHours = 0;
+                if (boss.cycleMinutes === undefined) boss.cycleMinutes = 0;
+
+                const lastKillTime = getTimestamp(boss.lastKill);
+                const totalCycleMinutes = (boss.cycleHours * 60) + boss.cycleMinutes;
+                const safeCycleMinutes = totalCycleMinutes > 0 ? totalCycleMinutes : 1;
+                const cycleMs = safeCycleMinutes * 60 * 1000;
+
+                if (isNaN(lastKillTime)) return;
+
+                let nextSpawn = lastKillTime;
+                while (nextSpawn <= now) {
+                    nextSpawn += cycleMs;
+                }
+                const secondSpawn = nextSpawn + cycleMs;
+
+                checkAlerts(boss.name, nextSpawn, alertOffset);
+
+                const diff = nextSpawn - now;
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+                const isImminent = diff <= alertOffset * 60 * 1000;
+
+                const card = document.createElement('div');
+                card.className = `bg-slate-900 border rounded-2xl p-5 flex flex-col justify-between shadow-xl transition-all duration-300 ${
+                    isImminent ? 'border-amber-500 shadow-amber-500/10 ring-2 ring-amber-500/30 animate-pulse' : 'border-slate-800'
+                }`;
+
+                card.innerHTML = `
+                    <div>
+                        <div class="flex justify-between items-start mb-3">
+                            <h2 class="text-lg font-bold text-slate-100">${boss.name}</h2>
+                            <span class="text-xs px-2.5 py-1 rounded-full font-semibold ${
+                                isImminent ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-400'
+                            }">
+                                ${isImminent ? '🔥 젠 임박!' : '대기 중'}
+                            </span>
+                        </div>
+
+                        <!-- 남은 시간 카운트다운 -->
+                        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800/80 mb-4 text-center">
+                            <div class="text-xs text-slate-400 mb-1">다음 젠까지 남은 시간</div>
+                            <div class="text-2xl font-black text-amber-400 font-mono">
+                                ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}
+                            </div>
+                        </div>
+
+                        <!-- 타임라인 (다음 2개) -->
+                        <div class="space-y-1.5 text-xs mb-4 bg-slate-950/50 p-3 rounded-xl border border-slate-800/50">
+                            <div class="flex justify-between text-slate-300">
+                                <span class="text-slate-400">1순위 젠:</span>
+                                <span class="font-semibold text-amber-300">${new Date(nextSpawn).toLocaleString()}</span>
+                            </div>
+                            <div class="flex justify-between text-slate-300">
+                                <span class="text-slate-400">2순위 젠:</span>
+                                <span class="text-slate-400">${new Date(secondSpawn).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 설정 변경 영역 -->
+                    <div class="space-y-3 pt-3 border-t border-slate-800 text-xs">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400">젠 주기:</span>
+                            <div class="flex items-center gap-1">
+                                <input type="number" id="cycleH_${index}" value="${boss.cycleHours}" min="0" max="168" 
+                                       class="w-11 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-center text-slate-200 font-semibold focus:outline-none focus:border-amber-500">
+                                <span class="text-slate-400">시간</span>
+                                <input type="number" id="cycleM_${index}" value="${boss.cycleMinutes}" min="0" max="59" 
+                                       class="w-11 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-center text-slate-200 font-semibold focus:outline-none focus:border-amber-500">
+                                <span class="text-slate-400">분</span>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-400">기준 시각:</span>
+                            <div class="flex items-center gap-0.5 whitespace-nowrap">
+                                <input type="number" id="m_${index}" value="${boss.lastKill.month}" min="1" max="12" 
+                                       class="w-8 bg-slate-950 border border-slate-700 rounded px-0.5 py-1 text-center text-slate-200 focus:outline-none focus:border-amber-500"><span class="text-slate-400 mr-0.5">월</span>
+                                <input type="number" id="d_${index}" value="${boss.lastKill.day}" min="1" max="31" 
+                                       class="w-8 bg-slate-950 border border-slate-700 rounded px-0.5 py-1 text-center text-slate-200 focus:outline-none focus:border-amber-500"><span class="text-slate-400 mr-0.5">일</span>
+                                <input type="number" id="h_${index}" value="${boss.lastKill.hour}" min="0" max="23" 
+                                       class="w-8 bg-slate-950 border border-slate-700 rounded px-0.5 py-1 text-center text-slate-200 focus:outline-none focus:border-amber-500"><span class="text-slate-400 mr-0.5">시</span>
+                                <input type="number" id="min_${index}" value="${boss.lastKill.minute}" min="0" max="59" 
+                                       class="w-8 bg-slate-950 border border-slate-700 rounded px-0.5 py-1 text-center text-slate-200 focus:outline-none focus:border-amber-500"><span class="text-slate-400">분</span>
+                            </div>
+                        </div>
+
+                        <button onclick="applyBossConfig(${index})" 
+                                class="w-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/40 font-semibold py-1.5 rounded-lg transition text-center">
+                            확인 / 적용 (실시간 공유)
+                        </button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function applyBossConfig(index) {
+            const cH = parseInt(document.getElementById(`cycleH_${index}`).value);
+            const cM = parseInt(document.getElementById(`cycleM_${index}`).value);
+            const m = parseInt(document.getElementById(`m_${index}`).value);
+            const d = parseInt(document.getElementById(`d_${index}`).value);
+            const h = parseInt(document.getElementById(`h_${index}`).value);
+            const min = parseInt(document.getElementById(`min_${index}`).value);
+
+            if (!isNaN(cH) && cH >= 0) bosses[index].cycleHours = cH;
+            if (!isNaN(cM) && cM >= 0) bosses[index].cycleMinutes = cM;
+
+            if (!isNaN(m)) bosses[index].lastKill.month = m;
+            if (!isNaN(d)) bosses[index].lastKill.day = d;
+            if (!isNaN(h)) bosses[index].lastKill.hour = h;
+            if (!isNaN(min)) bosses[index].lastKill.minute = min;
+
+            // 저장하는 순간 Firebase 서버를 통해 길드원 전원에게 전송됨!
+            saveData();
+        }
+
+        setInterval(() => {
+            if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+            render();
+        }, 1000);
+    </script>
+</body>
+</html>
