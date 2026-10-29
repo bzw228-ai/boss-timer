@@ -74,13 +74,10 @@
     </div>
 
     <script>
-        // ==========================================
-        // 🛠️ [여기에 본인의 파이어베이스 설정을 붙여넣으세요]
-        // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyCYQWm4i4VjBHpO1ANGmKC5FB87sqrB0gI",
             authDomain: "king-boss-timer.firebaseapp.com",
-            databaseURL: "[https://king-boss-timer-default-rtdb.asia-southeast1.firebasedatabase.app](https://king-boss-timer-default-rtdb.asia-southeast1.firebasedatabase.app)",
+            databaseURL: "https://king-boss-timer-default-rtdb.asia-southeast1.firebasedatabase.app",
             projectId: "king-boss-timer",
             storageBucket: "king-boss-timer.firebasestorage.app",
             messagingSenderId: "263803109395",
@@ -135,7 +132,6 @@
                 if (val.soundToggle !== undefined) document.getElementById('soundToggle').checked = val.soundToggle;
                 render();
             } else {
-                // 데이터가 아예 없으면 초기값 세팅
                 saveData();
             }
         });
@@ -323,7 +319,6 @@
             if (!isNaN(h)) bosses[index].lastKill.hour = h;
             if (!isNaN(min)) bosses[index].lastKill.minute = min;
 
-            // 저장하는 순간 Firebase 서버를 통해 길드원 전원에게 전송됨!
             saveData();
         }
 
